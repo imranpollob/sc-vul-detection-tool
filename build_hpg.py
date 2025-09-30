@@ -127,6 +127,22 @@ def initialize_slither(project_path: str) -> Slither:
             raise fallback_exc
 
 
+def sanitize_project_name(project_path: str) -> str:
+    path_obj = pathlib.Path(project_path).resolve()
+    cwd = pathlib.Path.cwd()
+
+    try:
+        rel = path_obj.relative_to(cwd)
+        name_source = str(rel)
+    except ValueError:
+        name_source = str(path_obj)
+
+    slug = re.sub(r"[^0-9A-Za-z]+", "_", name_source).strip("_")
+    if not slug:
+        slug = "project"
+    return f"{slug}.pt"
+
+
 def assign_id(mapping: Dict[object, int], item: object) -> int:
     if item not in mapping:
         mapping[item] = len(mapping)
@@ -335,7 +351,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
 
     hpg = build_hpg(slither)
-    output_path = os.path.join(os.getcwd(), "project_hpg.pt")
+    output_dir = os.path.join(os.getcwd(), "outputs")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, sanitize_project_name(project_path))
     torch.save(hpg, output_path)
     print(f"Saved HPG to {output_path}")
     return 0

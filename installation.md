@@ -59,6 +59,7 @@ python build_hpg.py dummy_dataset/project_multi
 ```
 
 Each run produces a `project_hpg.pt` file in the current working directory containing the serialized `torch_geometric.data.HeteroData` graph.
+The script now writes results to the `outputs/` directory, naming each file after the project path (e.g., `outputs/dummy_dataset_project_single.pt`).
 
 ## 6. Deactivate the Environment (Optional)
 
