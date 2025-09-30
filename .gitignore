@@ -1,0 +1,35 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Cache and logs
+.cache/
+.mypy_cache/
+pytest_cache/
+*.log
+
+# Torch / graph outputs
+project_hpg.pt
+*.pt
+
+# IDE settings
+.vscode/
+.idea/
+
+# Slither reports
+slither-report.json
+slither.db
+
+# Misc
+.DS_Store
