@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import pathlib
+import re
 import sys
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -39,11 +41,90 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def ensure_directory(path: str) -> None:
+def ensure_exists(path: str) -> None:
     if not os.path.exists(path):
         raise FileNotFoundError(f"Project path does not exist: {path}")
-    if not os.path.isdir(path):
-        raise NotADirectoryError(f"Project path must be a directory: {path}")
+
+
+def collect_solidity_targets(path: str) -> List[str]:
+    p = pathlib.Path(path)
+    if p.is_file():
+        if p.suffix != ".sol":
+            raise ValueError(f"File is not a Solidity source: {path}")
+        return [str(p.resolve())]
+
+    if not p.is_dir():
+        raise NotADirectoryError(
+            f"Project path must be a Solidity file or directory: {path}"
+        )
+
+    sol_files: List[str] = []
+    for file_path in p.rglob("*.sol"):
+        sol_files.append(str(file_path.resolve()))
+
+    return sorted(sol_files)
+
+
+IMPORT_PATTERN = re.compile(r"import\s+(?:[^;]*?from\s+)?['\"]([^'\"]+)['\"];?")
+
+
+def resolve_import_path(current_file: pathlib.Path, import_path: str) -> Optional[str]:
+    import_path = import_path.strip()
+    if not import_path:
+        return None
+
+    if import_path.startswith(("./", "../")):
+        resolved = (current_file.parent / import_path).resolve()
+        if resolved.exists():
+            return str(resolved)
+        return None
+
+    candidate = (current_file.parent / import_path).resolve()
+    if candidate.exists():
+        return str(candidate)
+
+    return None
+
+
+def select_entry_point(solidity_files: Sequence[str]) -> str:
+    if len(solidity_files) == 1:
+        return solidity_files[0]
+
+    imported: set[str] = set()
+
+    for file_path in solidity_files:
+        path_obj = pathlib.Path(file_path)
+        try:
+            content = path_obj.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+
+        for match in IMPORT_PATTERN.finditer(content):
+            resolved = resolve_import_path(path_obj, match.group(1))
+            if resolved:
+                imported.add(resolved)
+
+    for file_path in solidity_files:
+        if file_path not in imported:
+            return file_path
+
+    return solidity_files[0]
+
+
+def initialize_slither(project_path: str) -> Slither:
+    try:
+        return Slither(project_path)
+    except Exception as primary_exc:
+        solidity_targets = collect_solidity_targets(project_path)
+        if not solidity_targets:
+            raise primary_exc
+
+        try:
+            entry = select_entry_point(solidity_targets)
+            return Slither(entry)
+        except Exception as fallback_exc:  # pragma: no cover - external tool errors
+            fallback_exc.__cause__ = primary_exc
+            raise fallback_exc
 
 
 def assign_id(mapping: Dict[object, int], item: object) -> int:
@@ -61,7 +142,12 @@ def is_high_level_call(node: Node) -> bool:
             except Exception:
                 return False
         return bool(attr)
-    return node.type == NodeType.HIGH_LEVEL_CALL
+    hl_const = getattr(NodeType, "HIGH_LEVEL_CALL", None)
+    if hl_const is not None and getattr(node, "type", None) == hl_const:
+        return True
+    node_type = getattr(node, "type", None)
+    type_name = getattr(node_type, "name", "") if node_type is not None else ""
+    return type_name.upper().endswith("_CALL")
 
 
 def iter_called_functions(node: Node) -> Iterable[Function]:
@@ -237,13 +323,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     project_path = os.path.abspath(args.project_path)
 
     try:
-        ensure_directory(project_path)
-    except (FileNotFoundError, NotADirectoryError) as exc:
+        ensure_exists(project_path)
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 1
 
     try:
-        slither = Slither(project_path)
+        slither = initialize_slither(project_path)
     except Exception as exc:  # pragma: no cover - slither errors are external
         print(f"[error] Failed to initialize Slither: {exc}", file=sys.stderr)
         return 1
